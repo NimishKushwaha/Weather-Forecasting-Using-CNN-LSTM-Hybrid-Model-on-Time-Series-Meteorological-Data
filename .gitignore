@@ -1,0 +1,12 @@
+## Dependencies
+# Ignore any node_modules directory anywhere in the repo
+node_modules/
+**/node_modules/
+
+## API directory (if present at repo root)
+api/
+
+Test_data/Matrices/
+TS_npy/
+Data_npy/
+Cropped_data/

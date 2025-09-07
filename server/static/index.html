@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Weather Forecasting Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      :root { --bg:#0b1220; --panel:#0f172a; --muted:#64748b; --brand:#60a5fa; --border:#22314f; --accent:#22d3ee; }
+      * { box-sizing: border-box; }
+      body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: #e6edf3; }
+      header { padding: 16px 20px; background: #0b1329; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content:space-between; position: sticky; top:0; z-index:10; }
+      .brand { display:flex; align-items:center; gap:10px; font-weight:700; }
+      .brand .dot { width:10px; height:10px; border-radius:50%; background: var(--accent); box-shadow:0 0 10px var(--accent); }
+      .weather { font-size: 14px; color: var(--muted); }
+      main { padding: 24px; max-width: 1200px; margin: 0 auto; display: grid; gap: 24px; grid-template-columns: 1.2fr 0.8fr; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: 0 10px 30px rgba(2,8,23,0.4); }
+      h3 { margin: 0 0 8px; font-size: 18px; }
+      .desc { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+      .row { display:flex; gap:10px; flex-wrap:wrap; }
+      button { background: linear-gradient(135deg,#2563eb,#22d3ee); color:#fff; border:none; padding:10px 14px; border-radius: 10px; cursor:pointer; font-weight:600; box-shadow: 0 6px 20px rgba(37,99,235,0.4); }
+      button.secondary { background: #1e293b; box-shadow: none; border:1px solid var(--border); }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .metric { background: #0e1626; border:1px solid var(--border); border-radius: 12px; padding: 12px; text-align:center; }
+      .metric .label { color: var(--muted); font-size: 12px; }
+      .metric .value { margin-top: 4px; font-size: 20px; font-weight: 700; }
+      pre { white-space: pre-wrap; max-height: 320px; overflow: auto; background: #0a1222; padding: 12px; border-radius: 12px; border: 1px solid var(--border); }
+      .chart-wrap { background:#0a1222; border:1px solid var(--border); border-radius:12px; padding:12px; }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      const { useEffect, useRef, useState } = React;
+
+      function useWeather() {
+        const [text, setText] = useState('Loading current weather…');
+        async function fetchWeather() {
+          try {
+            const res = await fetch('/api/weather');
+            const data = await res.json();
+            if (data && data.main && data.weather) {
+              const desc = data.weather[0]?.description || '';
+              setText(`${data.name}: ${data.main.temp}°C, ${desc}`);
+            } else if (data.error) {
+              setText(data.error);
+            } else {
+              setText('Weather unavailable');
+            }
+          } catch(err) { setText('Weather fetch failed'); }
+        }
+        useEffect(() => {
+          fetchWeather();
+          const id = setInterval(fetchWeather, 300000);
+          return () => clearInterval(id);
+        }, []);
+        return text;
+      }
+
+      function LiveChart() {
+        const canvasRef = useRef(null);
+        const chartRef = useRef(null);
+        const [accSeries, setAccSeries] = useState([]);
+        const [lossSeries, setLossSeries] = useState([]);
+        useEffect(() => {
+          const ctx = canvasRef.current.getContext('2d');
+          chartRef.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [],
+              datasets: [
+                { label: 'Accuracy', data: [], borderColor: '#22d3ee', tension: .2 },
+                { label: 'Loss', data: [], borderColor: '#f59e0b', tension: .2 },
+              ]
+            },
+            options: { responsive: true, animation: false, plugins: { legend: { labels: { color: '#cbd5e1' } } }, scales: { x: { ticks: { color:'#94a3b8' } }, y: { ticks: { color:'#94a3b8' } } } }
+          });
+          return () => chartRef.current?.destroy();
+        }, []);
+        useEffect(() => {
+          const ch = chartRef.current; if (!ch) return;
+          const len = Math.max(accSeries.length, lossSeries.length);
+          ch.data.labels = Array.from({length: len}, (_,i)=> i+1);
+          ch.data.datasets[0].data = accSeries;
+          ch.data.datasets[1].data = lossSeries;
+          ch.update('none');
+        }, [accSeries, lossSeries]);
+        return React.createElement('div', { className:'chart-wrap' }, React.createElement('canvas', { ref: canvasRef, height: 160 }));
+      }
+
+      function App() {
+        const weather = useWeather();
+        const [status, setStatus] = useState('Idle');
+        const [imageAcc, setImageAcc] = useState('-');
+        const [tsMae, setTsMae] = useState('-');
+        const [tsRmse, setTsRmse] = useState('-');
+        const logsRef = useRef(null);
+        const chartAcc = useRef([]);
+        const chartLoss = useRef([]);
+        const chartKey = useRef(0);
+
+        function appendLog(line) {
+          const el = logsRef.current; if (!el) return;
+          el.textContent += line + '\n';
+          el.scrollTop = el.scrollHeight;
+        }
+
+        function startSSE(url) {
+          const es = new EventSource(url);
+          setStatus('Training…');
+          // reset
+          if (logsRef.current) logsRef.current.textContent = '';
+          chartAcc.current = []; chartLoss.current = [];
+          chartKey.current++;
+          es.onmessage = (ev) => {
+            if (ev.data === 'TRAINING_DONE') { setStatus('Done'); es.close(); return; }
+            if (ev.data.startsWith('metric')) {
+              const parts = ev.data.split('\t');
+              const name = parts[1]; const val = parseFloat(parts[2]);
+              if (name === 'acc') chartAcc.current = [...chartAcc.current, val];
+              if (name === 'loss') chartLoss.current = [...chartLoss.current, val];
+              // force re-render of chart by toggling key
+              chartKey.current++;
+              return;
+            }
+            appendLog(ev.data);
+          };
+          es.onerror = () => { setStatus('Error'); es.close(); };
+        }
+
+        async function getImageAcc() {
+          const res = await fetch('/api/accuracy/image');
+          const data = await res.json();
+          setImageAcc(data.accuracy != null ? Number(data.accuracy).toFixed(4) : 'N/A');
+        }
+        async function getTsMetrics() {
+          const res = await fetch('/api/accuracy/timeseries');
+          const data = await res.json();
+          setTsMae(data.mae != null ? Number(data.mae).toFixed(4) : 'N/A');
+          setTsRmse(data.rmse != null ? Number(data.rmse).toFixed(4) : 'N/A');
+        }
+
+        return (
+          React.createElement(React.Fragment, null,
+            React.createElement('header', null,
+              React.createElement('div', { className:'brand' },
+                React.createElement('div', { className:'dot' }),
+                'Weather Forecasting'
+              ),
+              React.createElement('div', { className:'weather' }, weather)
+            ),
+            React.createElement('main', null,
+              React.createElement('section', { className:'card' },
+                React.createElement('h3', null, 'Training Controls'),
+                React.createElement('p', { className:'desc' }, 'Start the training pipelines and watch logs and metrics in real time.'),
+                React.createElement('div', { className:'row' },
+                  React.createElement('button', { onClick:()=>startSSE('/api/train/image') }, 'Start Image Model Training'),
+                  React.createElement('button', { className:'secondary', onClick:()=>startSSE('/api/train/timeseries') }, 'Start Time-Series Model Training')
+                ),
+                React.createElement('div', { style:{ height:12 }}),
+                React.createElement(LiveChart, { key: chartKey.current, accSeries: chartAcc.current, lossSeries: chartLoss.current }),
+                React.createElement('div', { style:{ height:12 }}),
+                React.createElement('h3', null, 'Live Logs'),
+                React.createElement('pre', { ref: logsRef })
+              ),
+              React.createElement('section', { className:'card' },
+                React.createElement('h3', null, 'Model Metrics'),
+                React.createElement('p', { className:'desc' }, 'Fetch the latest accuracies and forecasting errors.'),
+                React.createElement('div', { className:'row' },
+                  React.createElement('button', { onClick: getImageAcc }, 'Get Image Accuracy'),
+                  React.createElement('button', { className:'secondary', onClick: getTsMetrics }, 'Get Time-Series Metrics')
+                ),
+                React.createElement('div', { className:'grid' },
+                  React.createElement('div', { className:'metric' }, React.createElement('div', { className:'label' }, 'Image Accuracy'), React.createElement('div', { className:'value', id:'image-acc' }, imageAcc) ),
+                  React.createElement('div', { className:'metric' }, React.createElement('div', { className:'label' }, 'TS MAE'), React.createElement('div', { className:'value', id:'ts-mae' }, tsMae) ),
+                  React.createElement('div', { className:'metric' }, React.createElement('div', { className:'label' }, 'TS RMSE'), React.createElement('div', { className:'value', id:'ts-rmse' }, tsRmse) ),
+                  React.createElement('div', { className:'metric' }, React.createElement('div', { className:'label' }, 'Status'), React.createElement('div', { className:'value', id:'status' }, status) )
+                )
+              )
+            )
+          )
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
+  </body>
+  </html>
+
+
